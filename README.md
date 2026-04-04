@@ -37,6 +37,7 @@ docker run -p 8080:8080 --env-file .env.local agency-backend
 - `GET /leads` — list all leads
 - `PATCH /leads/:id` — update lead status
 - `POST /auth/invite` — convert lead to client
+- `GET /clients` — list all clients
 - `GET /projects` — list all projects
 - `POST /projects` — create project
 - `PATCH /projects/:id` — update project

@@ -28,6 +28,7 @@ src/
 ├── routes/               # Route handlers
 │   ├── leads.ts          # POST /leads (public), GET/PATCH (admin)
 │   ├── auth.ts           # POST /auth/invite, /auth/reset
+│   ├── clients.ts        # GET /clients (admin)
 │   ├── projects.ts       # CRUD for projects
 │   ├── milestones.ts     # CRUD for milestones
 │   ├── messages.ts       # Project message threads

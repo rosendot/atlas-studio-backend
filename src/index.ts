@@ -3,6 +3,7 @@ import cors from "cors";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { leadsRouter } from "./routes/leads.js";
 import { authRouter } from "./routes/auth.js";
+import { clientsRouter } from "./routes/clients.js";
 import { projectsRouter } from "./routes/projects.js";
 import { milestonesRouter } from "./routes/milestones.js";
 import { messagesRouter } from "./routes/messages.js";
@@ -22,6 +23,7 @@ app.get("/health", (_req, res) => {
 // Routes
 app.use("/leads", leadsRouter);
 app.use("/auth", authRouter);
+app.use("/clients", clientsRouter);
 app.use("/projects", projectsRouter);
 app.use("/milestones", milestonesRouter);
 app.use("/messages", messagesRouter);
