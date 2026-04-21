@@ -1,6 +1,6 @@
-# Agency Backend
+# Atlas Studio Backend (`atlas-studio-backend`)
 
-Node.js + Express REST API for the agency. Handles leads, client auth, project tracking, messaging, and file sharing. Deployed on Google Cloud Run.
+Node.js + Express REST API for Atlas Studio. Handles leads, client auth, project tracking, messaging, and file sharing. Deployed on Google Cloud Run.
 
 ## Commands
 
@@ -66,7 +66,7 @@ src/
 
 ## Frontend Connection
 
-The frontend repo (`agency-frontend`) sends contact form submissions to `POST /leads`. CORS is configured via `FRONTEND_URL` env var.
+The frontend repo (`atlas-studio-frontend`) sends contact form submissions to `POST /leads`. CORS is configured via `FRONTEND_URL` env var.
 
 ## Environment Variables
 

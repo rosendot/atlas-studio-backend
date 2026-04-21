@@ -1,6 +1,6 @@
-# Agency Backend
+# Atlas Studio Backend (`atlas-studio-backend`)
 
-Node.js + Express REST API for the agency. Handles leads, client auth, project tracking, messaging, and file sharing. Deployed on Google Cloud Run.
+Node.js + Express REST API for Atlas Studio. Handles leads, client auth, project tracking, messaging, and file sharing. Deployed on Google Cloud Run.
 
 ## Setup
 
@@ -24,8 +24,8 @@ npm run build      # compile TypeScript to dist/
 npm start          # run production build
 
 # Docker (for Cloud Run)
-docker build -t agency-backend .
-docker run -p 8080:8080 --env-file .env.local agency-backend
+docker build -t atlas-studio-backend .
+docker run -p 8080:8080 --env-file .env.local atlas-studio-backend
 ```
 
 ## API Routes

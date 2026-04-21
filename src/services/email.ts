@@ -2,8 +2,8 @@ import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM = "inquiry@youragency.com";
-const ADMIN_EMAIL = "you@youragency.com";
+const FROM = "inquiry@atlasstudio.com";
+const ADMIN_EMAIL = "you@atlasstudio.com";
 
 /** Notify admin of a new lead */
 export async function sendLeadAlert(lead: {
@@ -52,7 +52,7 @@ export async function sendClientInvite(
       "",
       `Once logged in you can track your project progress, send us messages, and share files.`,
       "",
-      `— YourAgency`,
+      `— Atlas Studio`,
     ].join("\n"),
   });
 }
@@ -77,7 +77,7 @@ export async function sendMilestoneUpdate(
       "",
       `Log in to your portal to see the full update.`,
       "",
-      `— YourAgency`,
+      `— Atlas Studio`,
     ].join("\n"),
   });
 }
