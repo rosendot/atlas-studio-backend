@@ -2,6 +2,18 @@
 
 Node.js + Express REST API for Atlas Studio. Handles leads, client auth, project tracking, messaging, and file sharing. Deployed on Google Cloud Run.
 
+## What this powers
+
+Atlas Studio sells a custom website for local businesses where **the client controls the day-to-day content and we handle everything else** — design, hosting, security, maintenance, integrations. One flat **$399/mo**, no setup fee.
+
+This backend exists to support that model end-to-end:
+
+- **Public:** capture leads from the marketing site contact form
+- **Admin (you):** triage leads, convert qualified ones into clients, run projects, post milestone updates, exchange messages and files
+- **Client:** authenticated portal to follow their build, send messages, and access shared files. The day-to-day *site content* (menu, hours, photos) is edited by the client directly in WordPress on the site we build for them — **not in this portal.** This portal is the studio relationship layer; WordPress is the site they own.
+
+For full positioning, audience, hook, tone rules, and banned words, see [`atlas-studio-frontend/CLAUDE.md`](../atlas-studio-frontend/CLAUDE.md). Anything user-facing emitted by this backend (email subjects, body copy, error messages a client could see) must match that voice: plainspoken, confident, slightly dry. POS integration is a feature, never a hook.
+
 ## Commands
 
 - `npm run dev` — local dev server with hot reload at http://localhost:8080
@@ -63,6 +75,8 @@ src/
 ## Database
 
 6 tables: leads, clients, projects, milestones, messages, files. Migrations run in order via `npm run migrate`. Schema tracks a lead from form submission through client conversion, project delivery, and ongoing communication.
+
+The `leads.pos` column captures which POS the prospect uses (Square / Toast / Clover / Other / None) so the studio knows up-front whether an integration is in scope. It's a data point for sizing the build, not a marketing axis.
 
 ## Frontend Connection
 

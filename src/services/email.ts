@@ -46,13 +46,14 @@ export async function sendClientInvite(
     text: [
       `Hi ${name},`,
       "",
-      `Your client portal is ready. Use the link below to set up your password and log in:`,
+      `Your client portal is ready. Set up your password and log in here:`,
       "",
       inviteLink,
       "",
-      `Once logged in you can track your project progress, send us messages, and share files.`,
+      `Once you're in, you can follow your project, send us messages, and grab any files we share with you. Day-to-day questions and updates live here so nothing gets lost in email.`,
       "",
       `— Atlas Studio`,
+      `You run the business. We hold up your site.`,
     ].join("\n"),
   });
 }
@@ -71,13 +72,14 @@ export async function sendMilestoneUpdate(
     text: [
       `Hi ${clientName},`,
       "",
-      `A milestone on your project "${projectTitle}" has been completed:`,
+      `Quick update on "${projectTitle}" — another milestone is done:`,
       "",
       `  ✓ ${milestoneTitle}`,
       "",
-      `Log in to your portal to see the full update.`,
+      `Log in to your portal for the details.`,
       "",
       `— Atlas Studio`,
+      `You run the business. We hold up your site.`,
     ].join("\n"),
   });
 }

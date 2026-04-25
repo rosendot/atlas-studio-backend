@@ -2,6 +2,10 @@
 
 Node.js + Express REST API for Atlas Studio. Handles leads, client auth, project tracking, messaging, and file sharing. Deployed on Google Cloud Run.
 
+## What Atlas Studio sells
+
+A custom website for local businesses where **the client controls the day-to-day content and we handle everything else.** One flat **$399/mo**, no setup fee. See [CLAUDE.md](./CLAUDE.md) for what this backend specifically powers, and [`../atlas-studio-frontend/CLAUDE.md`](../atlas-studio-frontend/CLAUDE.md) for the full positioning rules. Any user-facing string this backend emits must match that voice.
+
 ## Setup
 
 ```bash
