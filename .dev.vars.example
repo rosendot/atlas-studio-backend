@@ -1,0 +1,10 @@
+# Local secrets for `wrangler dev`. Copy to .dev.vars and fill in.
+# .dev.vars is gitignored. In production, set these via `wrangler secret put`.
+
+RESEND_API_KEY=re_...
+ADMIN_UID=
+BETTER_AUTH_SECRET=
+
+# Optional — only if you enable Google OAuth
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=

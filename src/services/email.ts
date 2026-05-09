@@ -1,21 +1,27 @@
 import { Resend } from "resend";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import type { Bindings } from "../../worker-configuration";
 
 const FROM = "inquiry@atlasstudio.com";
 const ADMIN_EMAIL = "you@atlasstudio.com";
 
+function client(env: Bindings) {
+  return new Resend(env.RESEND_API_KEY);
+}
+
 /** Notify admin of a new lead */
-export async function sendLeadAlert(lead: {
-  name: string;
-  business: string;
-  email: string;
-  phone?: string;
-  pos?: string;
-  website?: string;
-  message?: string;
-}) {
-  await resend.emails.send({
+export async function sendLeadAlert(
+  env: Bindings,
+  lead: {
+    name: string;
+    business: string;
+    email: string;
+    phone?: string;
+    pos?: string;
+    website?: string;
+    message?: string;
+  },
+) {
+  await client(env).emails.send({
     from: FROM,
     to: ADMIN_EMAIL,
     subject: `New inquiry — ${lead.business}`,
@@ -33,39 +39,15 @@ export async function sendLeadAlert(lead: {
   });
 }
 
-/** Send portal invite to a new client */
-export async function sendClientInvite(
-  email: string,
-  name: string,
-  inviteLink: string,
-) {
-  await resend.emails.send({
-    from: FROM,
-    to: email,
-    subject: "Your client portal is ready",
-    text: [
-      `Hi ${name},`,
-      "",
-      `Your client portal is ready. Set up your password and log in here:`,
-      "",
-      inviteLink,
-      "",
-      `Once you're in, you can follow your project, send us messages, and grab any files we share with you. Day-to-day questions and updates live here so nothing gets lost in email.`,
-      "",
-      `— Atlas Studio`,
-      `You run the business. We hold up your site.`,
-    ].join("\n"),
-  });
-}
-
 /** Notify client of a milestone update */
 export async function sendMilestoneUpdate(
+  env: Bindings,
   email: string,
   clientName: string,
   milestoneTitle: string,
   projectTitle: string,
 ) {
-  await resend.emails.send({
+  await client(env).emails.send({
     from: FROM,
     to: email,
     subject: `Milestone completed — ${milestoneTitle}`,
@@ -79,7 +61,6 @@ export async function sendMilestoneUpdate(
       `Log in to your portal for the details.`,
       "",
       `— Atlas Studio`,
-      `You run the business. We hold up your site.`,
     ].join("\n"),
   });
 }

@@ -1,26 +1,37 @@
-import pool from "../db/client.js";
-import { sendMilestoneUpdate } from "./email.js";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "../db/client";
+import { sendMilestoneUpdate } from "./email";
+import type { Bindings } from "../../worker-configuration";
 
 /**
  * Look up the client for a milestone and send them an email notification.
  */
-export async function notifyMilestoneComplete(milestoneId: string) {
-  const { rows } = await pool.query(
-    `SELECT m.title AS milestone_title, p.title AS project_title, c.email, c.name
-     FROM milestones m
-     JOIN projects p ON p.id = m.project_id
-     JOIN clients c ON c.id = p.client_id
-     WHERE m.id = $1`,
-    [milestoneId],
-  );
+export async function notifyMilestoneComplete(
+  env: Bindings,
+  milestoneId: string,
+) {
+  const db = getDb(env);
 
-  if (rows.length === 0) return;
+  const [row] = await db
+    .select({
+      milestoneTitle: schema.milestones.title,
+      projectTitle: schema.projects.title,
+      email: schema.clients.email,
+      name: schema.clients.name,
+    })
+    .from(schema.milestones)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.milestones.projectId))
+    .innerJoin(schema.clients, eq(schema.clients.id, schema.projects.clientId))
+    .where(eq(schema.milestones.id, milestoneId))
+    .limit(1);
 
-  const row = rows[0];
+  if (!row) return;
+
   await sendMilestoneUpdate(
+    env,
     row.email,
     row.name,
-    row.milestone_title,
-    row.project_title,
+    row.milestoneTitle,
+    row.projectTitle,
   );
 }

@@ -1,77 +1,88 @@
-import { Router } from "express";
-import pool from "../db/client.js";
-import { requireAuth, type AuthRequest } from "../middleware/auth.js";
-import { missingField } from "../utils/validate.js";
-import { success, error } from "../utils/response.js";
+import { Hono } from "hono";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
+import type { Bindings, Variables } from "../../worker-configuration";
+import { getDb, schema, type Db } from "../db/client";
+import { requireAuth } from "../middleware/auth";
+import { missingField } from "../utils/validate";
+import { error, success } from "../utils/response";
 
-export const messagesRouter = Router();
+export const messagesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-/** Verify the requesting user has access to the given project */
+/** Verify the requesting user has access to the given project. */
 async function verifyProjectAccess(
+  db: Db,
   projectId: string,
   uid: string,
-  role: string,
+  role: "admin" | "client",
 ): Promise<boolean> {
   if (role === "admin") return true;
 
-  const { rows } = await pool.query(
-    `SELECT 1 FROM projects p
-     JOIN clients c ON c.id = p.client_id
-     WHERE p.id = $1 AND c.firebase_uid = $2`,
-    [projectId, uid],
-  );
-  return rows.length > 0;
+  const [row] = await db
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .innerJoin(schema.clients, eq(schema.clients.id, schema.projects.clientId))
+    .where(
+      and(eq(schema.projects.id, projectId), eq(schema.clients.authUid, uid)),
+    )
+    .limit(1);
+  return !!row;
 }
 
 /** GET /messages?project_id=xxx — get conversation thread */
-messagesRouter.get("/", requireAuth, async (req: AuthRequest, res, next) => {
-  try {
-    const projectId = req.query.project_id as string;
-    if (!projectId) return error(res, "project_id query parameter is required");
+messagesRouter.get("/", requireAuth, async (c) => {
+  const projectId = c.req.query("project_id");
+  if (!projectId) return error(c, "project_id query parameter is required");
 
-    if (!(await verifyProjectAccess(projectId, req.uid!, req.role!))) {
-      return error(res, "Access denied", 403);
-    }
-
-    const { rows } = await pool.query(
-      "SELECT * FROM messages WHERE project_id = $1 ORDER BY created_at ASC",
-      [projectId],
-    );
-
-    // Mark unread messages as read for this user
-    await pool.query(
-      `UPDATE messages SET read_at = now()
-       WHERE project_id = $1 AND sender_uid != $2 AND read_at IS NULL`,
-      [projectId, req.uid],
-    );
-
-    return success(res, rows);
-  } catch (err) {
-    next(err);
+  const db = getDb(c.env);
+  if (!(await verifyProjectAccess(db, projectId, c.var.uid, c.var.role))) {
+    return error(c, "Access denied", 403);
   }
+
+  const rows = await db
+    .select()
+    .from(schema.messages)
+    .where(eq(schema.messages.projectId, projectId))
+    .orderBy(asc(schema.messages.createdAt));
+
+  // Mark unread messages from the other party as read.
+  await db
+    .update(schema.messages)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(schema.messages.projectId, projectId),
+        ne(schema.messages.senderUid, c.var.uid),
+        isNull(schema.messages.readAt),
+      ),
+    );
+
+  return success(c, rows);
 });
 
 /** POST /messages — send a message */
-messagesRouter.post("/", requireAuth, async (req: AuthRequest, res, next) => {
-  try {
-    const missing = missingField(req.body, ["project_id", "body"]);
-    if (missing) return error(res, `${missing} is required`);
+messagesRouter.post("/", requireAuth, async (c) => {
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  if (!body) return error(c, "Invalid JSON body");
 
-    const { project_id, body } = req.body;
+  const missing = missingField(body, ["project_id", "body"]);
+  if (missing) return error(c, `${missing} is required`);
 
-    if (!(await verifyProjectAccess(project_id, req.uid!, req.role!))) {
-      return error(res, "Access denied", 403);
-    }
+  const projectId = String(body.project_id);
 
-    const { rows } = await pool.query(
-      `INSERT INTO messages (project_id, sender_uid, sender_role, body)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [project_id, req.uid, req.role, body],
-    );
-
-    return success(res, rows[0], 201);
-  } catch (err) {
-    next(err);
+  const db = getDb(c.env);
+  if (!(await verifyProjectAccess(db, projectId, c.var.uid, c.var.role))) {
+    return error(c, "Access denied", 403);
   }
+
+  const [message] = await db
+    .insert(schema.messages)
+    .values({
+      projectId,
+      senderUid: c.var.uid,
+      senderRole: c.var.role,
+      body: String(body.body),
+    })
+    .returning();
+
+  return success(c, message, 201);
 });

@@ -1,138 +1,124 @@
-import { Router } from "express";
-import pool from "../db/client.js";
-import { requireAuth, type AuthRequest } from "../middleware/auth.js";
-import { adminOnly } from "../middleware/adminOnly.js";
-import { missingField } from "../utils/validate.js";
-import { success, error } from "../utils/response.js";
+import { Hono } from "hono";
+import { desc, eq, getTableColumns } from "drizzle-orm";
+import type { Bindings, Variables } from "../../worker-configuration";
+import { getDb, schema } from "../db/client";
+import { requireAuth } from "../middleware/auth";
+import { adminOnly } from "../middleware/adminOnly";
+import { missingField } from "../utils/validate";
+import { error, success } from "../utils/response";
 
-export const projectsRouter = Router();
+export const projectsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+const VALID_STATUSES = [
+  "discovery",
+  "design",
+  "development",
+  "review",
+  "live",
+  "maintenance",
+] as const;
 
 /** GET /projects — admin gets all, client gets their own */
-projectsRouter.get("/", requireAuth, async (req: AuthRequest, res, next) => {
-  try {
-    if (req.role === "admin") {
-      const { rows } = await pool.query(
-        `SELECT p.*, c.name AS client_name, c.business
-         FROM projects p
-         JOIN clients c ON c.id = p.client_id
-         ORDER BY p.created_at DESC`,
-      );
-      return success(res, rows);
-    }
+projectsRouter.get("/", requireAuth, async (c) => {
+  const db = getDb(c.env);
 
-    // Client: get their own projects
-    const { rows } = await pool.query(
-      `SELECT p.*
-       FROM projects p
-       JOIN clients c ON c.id = p.client_id
-       WHERE c.firebase_uid = $1
-       ORDER BY p.created_at DESC`,
-      [req.uid],
-    );
-    return success(res, rows);
-  } catch (err) {
-    next(err);
+  if (c.var.role === "admin") {
+    const rows = await db
+      .select({
+        ...getTableColumns(schema.projects),
+        clientName: schema.clients.name,
+        business: schema.clients.business,
+      })
+      .from(schema.projects)
+      .innerJoin(schema.clients, eq(schema.clients.id, schema.projects.clientId))
+      .orderBy(desc(schema.projects.createdAt));
+    return success(c, rows);
   }
+
+  const rows = await db
+    .select(getTableColumns(schema.projects))
+    .from(schema.projects)
+    .innerJoin(schema.clients, eq(schema.clients.id, schema.projects.clientId))
+    .where(eq(schema.clients.authUid, c.var.uid))
+    .orderBy(desc(schema.projects.createdAt));
+  return success(c, rows);
 });
 
 /** GET /projects/:id — admin or owning client */
-projectsRouter.get("/:id", requireAuth, async (req: AuthRequest, res, next) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT p.*, c.name AS client_name, c.business, c.firebase_uid
-       FROM projects p
-       JOIN clients c ON c.id = p.client_id
-       WHERE p.id = $1`,
-      [req.params.id],
-    );
+projectsRouter.get("/:id", requireAuth, async (c) => {
+  const db = getDb(c.env);
 
-    if (rows.length === 0) return error(res, "Project not found", 404);
+  const [row] = await db
+    .select({
+      ...getTableColumns(schema.projects),
+      clientName: schema.clients.name,
+      business: schema.clients.business,
+      authUid: schema.clients.authUid,
+    })
+    .from(schema.projects)
+    .innerJoin(schema.clients, eq(schema.clients.id, schema.projects.clientId))
+    .where(eq(schema.projects.id, c.req.param("id")))
+    .limit(1);
 
-    const project = rows[0];
-    if (req.role !== "admin" && project.firebase_uid !== req.uid) {
-      return error(res, "Access denied", 403);
-    }
-
-    return success(res, project);
-  } catch (err) {
-    next(err);
+  if (!row) return error(c, "Project not found", 404);
+  if (c.var.role !== "admin" && row.authUid !== c.var.uid) {
+    return error(c, "Access denied", 403);
   }
+
+  return success(c, row);
 });
 
 /** POST /projects — admin only */
-projectsRouter.post(
-  "/",
-  requireAuth,
-  adminOnly,
-  async (req: AuthRequest, res, next) => {
-    try {
-      const missing = missingField(req.body, ["client_id", "title"]);
-      if (missing) return error(res, `${missing} is required`);
+projectsRouter.post("/", requireAuth, adminOnly, async (c) => {
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  if (!body) return error(c, "Invalid JSON body");
 
-      const { client_id, title, description, start_date } = req.body;
+  const missing = missingField(body, ["client_id", "title"]);
+  if (missing) return error(c, `${missing} is required`);
 
-      const { rows } = await pool.query(
-        `INSERT INTO projects (client_id, title, description, start_date)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [client_id, title, description || null, start_date || null],
-      );
+  const db = getDb(c.env);
+  const [project] = await db
+    .insert(schema.projects)
+    .values({
+      clientId: String(body.client_id),
+      title: String(body.title),
+      description: body.description ? String(body.description) : null,
+      startDate: body.start_date ? String(body.start_date) : null,
+    })
+    .returning();
 
-      return success(res, rows[0], 201);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+  return success(c, project, 201);
+});
 
 /** PATCH /projects/:id — admin only */
-projectsRouter.patch(
-  "/:id",
-  requireAuth,
-  adminOnly,
-  async (req: AuthRequest, res, next) => {
-    try {
-      const { title, description, status, launch_date, site_url } = req.body;
-      const validStatuses = [
-        "discovery",
-        "design",
-        "development",
-        "review",
-        "live",
-        "maintenance",
-      ];
+projectsRouter.patch("/:id", requireAuth, adminOnly, async (c) => {
+  const body = (await c.req
+    .json<Record<string, unknown>>()
+    .catch(() => ({}))) as Record<string, unknown>;
 
-      if (status && !validStatuses.includes(status)) {
-        return error(
-          res,
-          `status must be one of: ${validStatuses.join(", ")}`,
-        );
-      }
+  if (
+    body.status !== undefined &&
+    !VALID_STATUSES.includes(body.status as (typeof VALID_STATUSES)[number])
+  ) {
+    return error(c, `status must be one of: ${VALID_STATUSES.join(", ")}`);
+  }
 
-      const { rows } = await pool.query(
-        `UPDATE projects
-         SET title = COALESCE($1, title),
-             description = COALESCE($2, description),
-             status = COALESCE($3, status),
-             launch_date = COALESCE($4, launch_date),
-             site_url = COALESCE($5, site_url),
-             updated_at = now()
-         WHERE id = $6
-         RETURNING *`,
-        [
-          title || null,
-          description || null,
-          status || null,
-          launch_date || null,
-          site_url || null,
-          req.params.id,
-        ],
-      );
+  const updates: Partial<typeof schema.projects.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+  if (body.title !== undefined) updates.title = String(body.title);
+  if (body.description !== undefined) updates.description = String(body.description);
+  if (body.status !== undefined) updates.status = String(body.status);
+  if (body.launch_date !== undefined) updates.launchDate = String(body.launch_date);
+  if (body.site_url !== undefined) updates.siteUrl = String(body.site_url);
 
-      if (rows.length === 0) return error(res, "Project not found", 404);
-      return success(res, rows[0]);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+  const db = getDb(c.env);
+  const [updated] = await db
+    .update(schema.projects)
+    .set(updates)
+    .where(eq(schema.projects.id, c.req.param("id")))
+    .returning();
+
+  if (!updated) return error(c, "Project not found", 404);
+  return success(c, updated);
+});

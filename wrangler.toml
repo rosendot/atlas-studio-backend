@@ -1,0 +1,24 @@
+name = "atlas-studio-backend"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FRONTEND_URL = "http://localhost:4321"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "atlas-studio"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "src/db/migrations"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "atlas-studio-files"
+
+# Secrets (set via `wrangler secret put`):
+#   RESEND_API_KEY        — Resend API key for transactional email
+#   ADMIN_UID             — Better Auth user.id of the admin (you)
+#   BETTER_AUTH_SECRET    — random 32+ byte secret; rotate carefully
+#   GOOGLE_CLIENT_ID      — optional, for Sign in with Google
+#   GOOGLE_CLIENT_SECRET  — optional, for Sign in with Google

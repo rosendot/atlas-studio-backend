@@ -1,17 +1,15 @@
-import type { Response, NextFunction } from "express";
-import type { AuthRequest } from "./auth.js";
+import type { MiddlewareHandler } from "hono";
+import type { Bindings, Variables } from "../../worker-configuration";
 
 /**
  * Restrict route to admin only. Must be used after requireAuth.
  */
-export function adminOnly(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction,
-): void {
-  if (req.role !== "admin") {
-    res.status(403).json({ error: "Admin access required" });
-    return;
+export const adminOnly: MiddlewareHandler<{
+  Bindings: Bindings;
+  Variables: Variables;
+}> = async (c, next) => {
+  if (c.var.role !== "admin") {
+    return c.json({ error: "Admin access required" }, 403);
   }
-  next();
-}
+  await next();
+};

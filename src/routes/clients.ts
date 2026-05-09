@@ -1,24 +1,19 @@
-import { Router } from "express";
-import pool from "../db/client.js";
-import { requireAuth, type AuthRequest } from "../middleware/auth.js";
-import { adminOnly } from "../middleware/adminOnly.js";
-import { success } from "../utils/response.js";
+import { Hono } from "hono";
+import { desc } from "drizzle-orm";
+import type { Bindings, Variables } from "../../worker-configuration";
+import { getDb, schema } from "../db/client";
+import { requireAuth } from "../middleware/auth";
+import { adminOnly } from "../middleware/adminOnly";
+import { success } from "../utils/response";
 
-export const clientsRouter = Router();
+export const clientsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 /** GET /clients — admin only, list all clients */
-clientsRouter.get(
-  "/",
-  requireAuth,
-  adminOnly,
-  async (_req: AuthRequest, res, next) => {
-    try {
-      const { rows } = await pool.query(
-        "SELECT * FROM clients ORDER BY created_at DESC",
-      );
-      return success(res, rows);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+clientsRouter.get("/", requireAuth, adminOnly, async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select()
+    .from(schema.clients)
+    .orderBy(desc(schema.clients.createdAt));
+  return success(c, rows);
+});

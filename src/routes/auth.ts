@@ -1,105 +1,127 @@
-import { Router } from "express";
-import { getAuth } from "firebase-admin/auth";
-import pool from "../db/client.js";
-import { requireAuth, type AuthRequest } from "../middleware/auth.js";
-import { adminOnly } from "../middleware/adminOnly.js";
-import { missingField, isValidEmail } from "../utils/validate.js";
-import { success, error } from "../utils/response.js";
-import { initFirebase } from "../services/firebase.js";
-import { sendClientInvite } from "../services/email.js";
+import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import type { Bindings, Variables } from "../../worker-configuration";
+import { getDb, schema } from "../db/client";
+import { getAuth } from "../lib/auth";
+import { requireAuth } from "../middleware/auth";
+import { adminOnly } from "../middleware/adminOnly";
+import { isValidEmail, missingField } from "../utils/validate";
+import { error, success } from "../utils/response";
 
-export const authRouter = Router();
-
-/**
- * POST /auth/invite — admin only
- * Convert a lead into a client: create Firebase user, insert into clients table, send invite email.
- */
-authRouter.post(
-  "/invite",
-  requireAuth,
-  adminOnly,
-  async (req: AuthRequest, res, next) => {
-    try {
-      initFirebase();
-
-      const missing = missingField(req.body, ["lead_id"]);
-      if (missing) return error(res, `${missing} is required`);
-
-      const { lead_id } = req.body;
-
-      // Get the lead
-      const { rows: leads } = await pool.query(
-        "SELECT * FROM leads WHERE id = $1",
-        [lead_id],
-      );
-      if (leads.length === 0) return error(res, "Lead not found", 404);
-
-      const lead = leads[0];
-
-      // Check if client already exists for this lead
-      const { rows: existing } = await pool.query(
-        "SELECT id FROM clients WHERE lead_id = $1",
-        [lead_id],
-      );
-      if (existing.length > 0)
-        return error(res, "This lead has already been converted to a client");
-
-      // Create Firebase user
-      const firebaseUser = await getAuth().createUser({
-        email: lead.email,
-        displayName: lead.name,
-      });
-
-      // Generate password reset link (acts as invite)
-      const inviteLink = await getAuth().generatePasswordResetLink(lead.email);
-
-      // Insert client record
-      const { rows: clients } = await pool.query(
-        `INSERT INTO clients (lead_id, firebase_uid, name, business, email)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING *`,
-        [lead_id, firebaseUser.uid, lead.name, lead.business, lead.email],
-      );
-
-      // Update lead status
-      await pool.query("UPDATE leads SET status = 'converted' WHERE id = $1", [
-        lead_id,
-      ]);
-
-      // Send invite email
-      sendClientInvite(lead.email, lead.name, inviteLink).catch((err) =>
-        console.error("Failed to send invite:", err),
-      );
-
-      return success(res, clients[0], 201);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+export const authRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 /**
- * POST /auth/reset — public, request a password reset link
+ * POST /auth/invite — admin only.
+ *
+ * Convert a lead into a client:
+ *   1. Create a Better Auth user with a random throwaway password.
+ *   2. Trigger Better Auth's password reset email — the link in that email
+ *      is the actual invite. Clicking it lets the client set their real password.
+ *   3. Insert into the clients table, link via auth_uid.
+ *
+ * Better Auth's `sendResetPassword` hook (configured in src/lib/auth.ts)
+ * is what actually sends the email through Resend.
  */
-authRouter.post("/reset", async (req, res, next) => {
-  try {
-    initFirebase();
+authRouter.post("/invite", requireAuth, adminOnly, async (c) => {
+  const body = (await c.req
+    .json<{ lead_id?: string }>()
+    .catch(() => ({}))) as { lead_id?: string };
+  const missing = missingField(body, ["lead_id"]);
+  if (missing) return error(c, `${missing} is required`);
 
-    const { email } = req.body;
-    if (!email || !isValidEmail(email))
-      return error(res, "Valid email is required");
+  const db = getDb(c.env);
 
-    // Always return success to avoid leaking whether the email exists
-    try {
-      const link = await getAuth().generatePasswordResetLink(email);
-      // In production, send this via email instead of returning it
-      console.log(`Password reset link generated for ${email}`);
-    } catch {
-      // User doesn't exist — don't reveal this
-    }
+  const [lead] = await db
+    .select()
+    .from(schema.leads)
+    .where(eq(schema.leads.id, body.lead_id!))
+    .limit(1);
+  if (!lead) return error(c, "Lead not found", 404);
 
-    return success(res, { message: "If that email exists, a reset link has been sent." });
-  } catch (err) {
-    next(err);
+  const [existing] = await db
+    .select({ id: schema.clients.id })
+    .from(schema.clients)
+    .where(eq(schema.clients.leadId, lead.id))
+    .limit(1);
+  if (existing) return error(c, "This lead has already been converted to a client");
+
+  const auth = getAuth(c.env);
+
+  // 1. Provision the auth user. Random password is fine — the client never
+  //    sees it; they set their real password through the reset flow.
+  const throwaway = crypto.randomUUID() + crypto.randomUUID();
+  const signUpResult = await auth.api.signUpEmail({
+    body: {
+      email: lead.email,
+      password: throwaway,
+      name: lead.name,
+    },
+  });
+
+  if (!signUpResult?.user) {
+    return error(c, "Failed to provision auth user", 502);
   }
+
+  // 2. Insert the client row, linked to the new auth user.
+  const [client] = await db
+    .insert(schema.clients)
+    .values({
+      leadId: lead.id,
+      authUid: signUpResult.user.id,
+      name: lead.name,
+      business: lead.business,
+      email: lead.email,
+    })
+    .returning();
+
+  await db
+    .update(schema.leads)
+    .set({ status: "converted" })
+    .where(eq(schema.leads.id, lead.id));
+
+  // 3. Send the invite email by triggering Better Auth's reset-password flow.
+  c.executionCtx.waitUntil(
+    auth.api
+      .requestPasswordReset({
+        body: {
+          email: lead.email,
+          redirectTo: `${c.env.FRONTEND_URL}/portal/welcome`,
+        },
+      })
+      .catch((err: unknown) =>
+        console.error("Failed to send invite email:", err),
+      ),
+  );
+
+  return success(c, client, 201);
+});
+
+/**
+ * POST /auth/reset — public, request a password reset link.
+ * Always responds success to avoid leaking whether the email exists.
+ */
+authRouter.post("/reset", async (c) => {
+  const body = (await c.req
+    .json<{ email?: string }>()
+    .catch(() => ({}))) as { email?: string };
+  if (!body.email || !isValidEmail(body.email)) {
+    return error(c, "Valid email is required");
+  }
+
+  const auth = getAuth(c.env);
+
+  c.executionCtx.waitUntil(
+    auth.api
+      .requestPasswordReset({
+        body: {
+          email: body.email,
+          redirectTo: `${c.env.FRONTEND_URL}/portal/reset`,
+        },
+      })
+      .catch(() => undefined),
+  );
+
+  return success(c, {
+    message: "If that email exists, a reset link has been sent.",
+  });
 });

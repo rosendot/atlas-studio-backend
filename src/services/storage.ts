@@ -1,40 +1,52 @@
-import { Storage } from "@google-cloud/storage";
+import type { Bindings } from "../../worker-configuration";
 
-const storage = new Storage();
-const bucketName = process.env.GCS_BUCKET || "";
-
-function getBucket() {
-  if (!bucketName) throw new Error("GCS_BUCKET env var is required");
-  return storage.bucket(bucketName);
-}
-
-/** Upload a buffer to GCS and return the storage path */
+/**
+ * Upload a body to R2 under projects/<projectId>/<id>-<filename>.
+ * Returns the storage key for the database record.
+ */
 export async function uploadFile(
-  buffer: Buffer,
+  env: Bindings,
+  body: ArrayBuffer | ReadableStream | Blob,
   filename: string,
   projectId: string,
   contentType?: string,
 ): Promise<string> {
-  const storagePath = `projects/${projectId}/${Date.now()}-${filename}`;
-  const bucket = getBucket();
-  const file = bucket.file(storagePath);
+  const id = crypto.randomUUID();
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const key = `projects/${projectId}/${id}-${safeName}`;
 
-  await file.save(buffer, {
-    metadata: { contentType: contentType || "application/octet-stream" },
+  await env.FILES.put(key, body, {
+    httpMetadata: {
+      contentType: contentType || "application/octet-stream",
+      contentDisposition: `attachment; filename="${safeName}"`,
+    },
   });
 
-  return storagePath;
+  return key;
 }
 
-/** Generate a signed download URL (valid 1 hour) */
-export async function getSignedUrl(storagePath: string): Promise<string> {
-  const bucket = getBucket();
-  const file = bucket.file(storagePath);
+/**
+ * Stream a file directly from R2 through the Worker.
+ *
+ * R2 doesn't expose Cloudflare-issued presigned URLs to bound buckets, so we
+ * proxy reads through the Worker. The request is already authenticated by
+ * `requireAuth` upstream, which is the access boundary we want anyway.
+ */
+export async function getFileResponse(
+  env: Bindings,
+  storagePath: string,
+): Promise<Response> {
+  const obj = await env.FILES.get(storagePath);
+  if (!obj) return new Response("File not found", { status: 404 });
 
-  const [url] = await file.getSignedUrl({
-    action: "read",
-    expires: Date.now() + 60 * 60 * 1000,
-  });
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set("etag", obj.httpEtag);
 
-  return url;
+  return new Response(obj.body, { headers });
+}
+
+/** Delete a file from R2. */
+export async function deleteFile(env: Bindings, storagePath: string): Promise<void> {
+  await env.FILES.delete(storagePath);
 }

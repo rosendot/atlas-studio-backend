@@ -1,80 +1,84 @@
-import { Router } from "express";
-import pool from "../db/client.js";
-import { requireAuth, type AuthRequest } from "../middleware/auth.js";
-import { adminOnly } from "../middleware/adminOnly.js";
-import { missingField, isValidEmail } from "../utils/validate.js";
-import { success, error } from "../utils/response.js";
-import { sendLeadAlert } from "../services/email.js";
+import { Hono } from "hono";
+import { desc, eq } from "drizzle-orm";
+import type { Bindings, Variables } from "../../worker-configuration";
+import { getDb, schema } from "../db/client";
+import { requireAuth } from "../middleware/auth";
+import { adminOnly } from "../middleware/adminOnly";
+import { isValidEmail, missingField } from "../utils/validate";
+import { error, success } from "../utils/response";
+import { sendLeadAlert } from "../services/email";
 
-export const leadsRouter = Router();
+export const leadsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+const VALID_STATUSES = ["new", "contacted", "converted", "closed"] as const;
 
 /** POST /leads — public, contact form submission */
-leadsRouter.post("/", async (req, res, next) => {
-  try {
-    const missing = missingField(req.body, ["name", "business", "email"]);
-    if (missing) return error(res, `${missing} is required`);
-    if (!isValidEmail(req.body.email))
-      return error(res, "Invalid email address");
+leadsRouter.post("/", async (c) => {
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  if (!body) return error(c, "Invalid JSON body");
 
-    const { name, business, email, phone, pos, website, message } = req.body;
-
-    const { rows } = await pool.query(
-      `INSERT INTO leads (name, business, email, phone, pos, website, message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [name, business, email, phone || null, pos || null, website || null, message || null],
-    );
-
-    // Send email notification (don't block the response)
-    sendLeadAlert({ name, business, email, phone, pos, website, message }).catch(
-      (err) => console.error("Failed to send lead alert:", err),
-    );
-
-    return success(res, rows[0], 201);
-  } catch (err) {
-    next(err);
+  const missing = missingField(body, ["name", "business", "email"]);
+  if (missing) return error(c, `${missing} is required`);
+  if (typeof body.email !== "string" || !isValidEmail(body.email)) {
+    return error(c, "Invalid email address");
   }
+
+  const lead = {
+    name: String(body.name),
+    business: String(body.business),
+    email: body.email,
+    phone: body.phone ? String(body.phone) : null,
+    pos: body.pos ? String(body.pos) : null,
+    website: body.website ? String(body.website) : null,
+    message: body.message ? String(body.message) : null,
+  };
+
+  const db = getDb(c.env);
+  const [inserted] = await db.insert(schema.leads).values(lead).returning();
+
+  c.executionCtx.waitUntil(
+    sendLeadAlert(c.env, {
+      name: lead.name,
+      business: lead.business,
+      email: lead.email,
+      phone: lead.phone ?? undefined,
+      pos: lead.pos ?? undefined,
+      website: lead.website ?? undefined,
+      message: lead.message ?? undefined,
+    }).catch((err) => console.error("Failed to send lead alert:", err)),
+  );
+
+  return success(c, inserted, 201);
 });
 
 /** GET /leads — admin only, list all leads */
-leadsRouter.get(
-  "/",
-  requireAuth,
-  adminOnly,
-  async (_req: AuthRequest, res, next) => {
-    try {
-      const { rows } = await pool.query(
-        "SELECT * FROM leads ORDER BY created_at DESC",
-      );
-      return success(res, rows);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+leadsRouter.get("/", requireAuth, adminOnly, async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select()
+    .from(schema.leads)
+    .orderBy(desc(schema.leads.createdAt));
+  return success(c, rows);
+});
 
 /** PATCH /leads/:id — admin only, update lead status */
-leadsRouter.patch(
-  "/:id",
-  requireAuth,
-  adminOnly,
-  async (req: AuthRequest, res, next) => {
-    try {
-      const { status } = req.body;
-      const validStatuses = ["new", "contacted", "converted", "closed"];
-      if (!status || !validStatuses.includes(status)) {
-        return error(res, `status must be one of: ${validStatuses.join(", ")}`);
-      }
+leadsRouter.patch("/:id", requireAuth, adminOnly, async (c) => {
+  const body = (await c.req
+    .json<{ status?: string }>()
+    .catch(() => ({}))) as { status?: string };
+  const status = body.status;
 
-      const { rows } = await pool.query(
-        "UPDATE leads SET status = $1 WHERE id = $2 RETURNING *",
-        [status, req.params.id],
-      );
+  if (!status || !VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
+    return error(c, `status must be one of: ${VALID_STATUSES.join(", ")}`);
+  }
 
-      if (rows.length === 0) return error(res, "Lead not found", 404);
-      return success(res, rows[0]);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+  const db = getDb(c.env);
+  const [updated] = await db
+    .update(schema.leads)
+    .set({ status })
+    .where(eq(schema.leads.id, c.req.param("id")))
+    .returning();
+
+  if (!updated) return error(c, "Lead not found", 404);
+  return success(c, updated);
+});
