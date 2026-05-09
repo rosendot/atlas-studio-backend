@@ -8,7 +8,7 @@ Atlas Studio sells **custom Astro websites for local businesses**, hosted on Clo
 
 - **Public:** capture leads from the marketing site contact form
 - **Admin (you):** triage leads, convert qualified ones into clients, run projects, post milestone updates, exchange messages and files
-- **Client:** authenticated portal to follow their build, send messages, and pull files. Day-to-day site content (menu, hours, photos) is pulled from the client's own POS (Square / Toast) or edited by the studio on request — **not in this portal.** This portal is purely the studio relationship layer.
+- **Client:** authenticated portal to follow their build, send messages, and pull files. The portal is purely the studio relationship layer — site content (menu, hours, photos, copy) is updated by the studio on request via email, **not** edited in the portal.
 
 For full positioning, audience, hook, tone rules, and banned words, see [`atlas-studio-frontend/CLAUDE.md`](../atlas-studio-frontend/CLAUDE.md). Anything user-facing emitted by this backend (email subjects, body copy, error messages a client could see) must match that voice: plainspoken, confident, slightly dry. POS integration is a feature, never a hook.
 
@@ -92,7 +92,7 @@ R2 bucket `atlas-studio-files`, bound in `wrangler.toml` as `FILES`. Files are u
 
 ## Frontend Connection
 
-The Astro brochure site (`atlas-studio-frontend`, deployed to Cloudflare Pages) sends contact form submissions to `POST /leads` and renders the authenticated client portal pages. The frontend uses Better Auth's client SDK (`better-auth/client`) to call `/api/auth/*` directly — sign-in, sign-out, password reset, OAuth.
+The Astro marketing site (`atlas-studio-frontend`, deployed to Cloudflare Pages) sends contact form submissions to `POST /leads` and renders the authenticated client portal pages. The frontend uses Better Auth's client SDK (`better-auth/client`) to call `/api/auth/*` directly — sign-in, sign-out, password reset, OAuth.
 
 CORS is allowed from `FRONTEND_URL` only, with `credentials: true` so the session cookie is included on cross-origin calls. Frontend `fetch` calls must set `credentials: "include"`.
 
