@@ -10,27 +10,29 @@ A custom Astro website for local businesses, hosted on Cloudflare Pages. Clients
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars     # local secrets for `wrangler dev`
-npm run dev                         # http://localhost:8787
+cp .dev.vars.example .dev.vars     # fill in local secrets
+npm run dev                         # http://localhost:8787 (bound to production D1 + R2)
 ```
 
-Bindings (D1, R2, KV) are configured in [`wrangler.toml`](./wrangler.toml). Run `wrangler login` once before deploying.
+`wrangler dev --remote` runs the Worker on your laptop but reads/writes the real production D1 and R2 — so local dev sees the same data production sees. Be careful with writes: a test signup creates a real user. With no clients yet, this is a feature; once you have clients, you'd add separate dev resources.
+
+Bindings (D1, R2) are configured in [`wrangler.toml`](./wrangler.toml) and consumed by Cloudflare's Workers Builds pipeline on every push to `main`.
 
 ## Database
 
-```bash
-npm run migrate          # apply migrations to local D1
-npm run migrate:remote   # apply migrations to production D1
-npm run seed             # insert dev seed data into local D1
-```
+Production D1 is the source of truth. The Drizzle TypeScript schema in [`src/db/schema.ts`](./src/db/schema.ts) must stay in sync with what's actually in the database.
+
+To change the schema:
+1. Edit `src/db/schema.ts` for the types
+2. Apply the matching SQL to production D1 via the Cloudflare dashboard's D1 SQL console (or via MCP if you're working with Claude)
+
+There are no local migration files. The schema lives in D1 itself.
 
 ## Deploy
 
-```bash
-npm run deploy           # publishes Worker to api.atlasstudio.<tld>
-```
+Push to `main`. Cloudflare's Workers Builds picks it up via the connected GitHub repo, runs `npm install` and `npx wrangler deploy`, and ships it. No CLI deploy from your laptop required.
 
-There is no Docker image, no Cloud Run service, no Cloud SQL. Deployment is `wrangler deploy`.
+Secrets live in the Cloudflare dashboard (Workers → atlas-studio-backend → Settings → Variables and Secrets), not in the repo.
 
 ## API Routes
 
@@ -59,13 +61,9 @@ Better Auth handles sign-in, sign-up, OAuth callbacks, password reset, email ver
 - `GET /messages?project_id=xxx` — view messages
 - `POST /messages` — send message
 - `GET /files?project_id=xxx` — list files
-- `GET /files/:id/download` — get short-lived presigned R2 URL
+- `GET /files/:id/download` — Worker-streamed R2 download
 - `POST /files` — upload file (multipart) to R2
 
 ## Generating `BETTER_AUTH_SECRET`
 
-```bash
-openssl rand -base64 32
-```
-
-Set it once locally in `.dev.vars` and once in production via `wrangler secret put BETTER_AUTH_SECRET`. Don't rotate without a plan — rotating invalidates all active sessions.
+Use 1Password's password generator (or any 32+ character random string). Set it in `.dev.vars` for local dev, and in the Cloudflare dashboard for production. Don't rotate without a plan — rotating invalidates all active sessions.

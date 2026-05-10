@@ -10,7 +10,6 @@ FRONTEND_URL = "https://atlasstudio.dev"
 binding = "DB"
 database_name = "atlas-studio"
 database_id = "879b2a75-99f6-4b1e-aaca-9b49569c3db5"
-migrations_dir = "src/db/migrations"
 
 [[r2_buckets]]
 binding = "FILES"

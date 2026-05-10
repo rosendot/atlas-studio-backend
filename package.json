@@ -3,12 +3,7 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "migrate": "wrangler d1 migrations apply atlas-studio --local",
-    "migrate:remote": "wrangler d1 migrations apply atlas-studio --remote",
-    "seed": "wrangler d1 execute atlas-studio --local --file=./src/db/seeds/dev.sql",
-    "seed:remote": "wrangler d1 execute atlas-studio --remote --file=./src/db/seeds/dev.sql",
+    "dev": "wrangler dev --remote",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +14,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
-    "drizzle-kit": "^0.31.10",
     "typescript": "^5.7.3",
     "wrangler": "^3.95.0"
   }

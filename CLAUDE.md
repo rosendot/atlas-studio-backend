@@ -14,10 +14,10 @@ For full positioning, audience, hook, tone rules, and banned words, see [`atlas-
 
 ## Commands
 
-- `npm run dev` — local dev via Wrangler at http://localhost:8787
-- `npm run deploy` — deploy Worker to production
-- `npm run migrate` — run D1 migrations against the configured database
-- `npm run seed` — insert dev seed data into local D1
+- `npm run dev` — local Worker at http://localhost:8787, **bound to production D1 + R2** via `wrangler dev --remote`. Lets you debug the real flow against real data without deploying. Be careful — writes affect production.
+- `npm run typecheck` — TypeScript type-check the project
+
+Deploys happen via Cloudflare's dashboard Git integration on every push to `main`. Schema lives only in production D1 (no migration files in the repo) — to change it, edit [`src/db/schema.ts`](src/db/schema.ts) for the Drizzle types and apply the corresponding SQL to production D1 via the dashboard console or MCP.
 
 ## Stack
 
@@ -56,9 +56,7 @@ src/
 │   └── notifications.ts  # Composed flows (e.g. milestone completion email)
 ├── db/
 │   ├── client.ts         # Drizzle client factory — getDb(env)
-│   ├── schema.ts         # Drizzle schema (app tables + Better Auth tables)
-│   ├── migrations/       # D1 SQL migrations (applied by `wrangler d1 migrations apply`)
-│   └── seeds/dev.sql     # Local seed data
+│   └── schema.ts         # Drizzle schema for typed queries (app tables + Better Auth tables)
 └── utils/
     ├── validate.ts       # Input validation helpers
     └── response.ts       # Consistent JSON response shape (Hono c.json wrappers)
@@ -76,13 +74,22 @@ src/
 
 ### Auth tables (Better Auth-owned)
 
-`user`, `session`, `account`, `verification` — schema names match Better Auth's defaults so the Drizzle adapter picks them up automatically. Defined in [`src/db/schema.ts`](src/db/schema.ts), created in [`src/db/migrations/0002_better_auth.sql`](src/db/migrations/0002_better_auth.sql). Don't rename without also updating the `schema` map in [`src/lib/auth.ts`](src/lib/auth.ts).
+`user`, `session`, `account`, `verification` — schema names match Better Auth's defaults so the Drizzle adapter picks them up automatically. Defined in [`src/db/schema.ts`](src/db/schema.ts). Don't rename without also updating the `schema` map in [`src/lib/auth.ts`](src/lib/auth.ts).
 
 The application's `clients.auth_uid` column is a foreign key into `user.id` — that's the link between a paying client and their auth identity.
 
 ## Database
 
-D1 (SQLite). Application tables: `leads`, `clients`, `projects`, `milestones`, `messages`, `files`. Auth tables (Better Auth-owned): `user`, `session`, `account`, `verification`. Schema is defined in `src/db/schema.ts` via Drizzle and migrated through SQL files in `src/db/migrations/`. Migrations run via `npm run migrate` (local) or `npm run migrate:remote` (production), both wrapping `wrangler d1 migrations apply`.
+D1 (SQLite). Application tables: `leads`, `clients`, `projects`, `milestones`, `messages`, `files`. Auth tables (Better Auth-owned): `user`, `session`, `account`, `verification`.
+
+Production D1 is the **single source of truth** for the schema. The Drizzle TypeScript schema in [`src/db/schema.ts`](src/db/schema.ts) is what queries use for typed access — keep it in sync with what's actually in production D1.
+
+When changing the schema:
+1. Edit `src/db/schema.ts` for the Drizzle types
+2. Apply the corresponding SQL to production D1 via the Cloudflare dashboard SQL console (or MCP)
+3. There are no migration files, no local schema files. Production is the schema.
+
+Local dev (`wrangler dev --remote`) connects to production D1 directly, so there's no local database to keep in sync.
 
 The `leads.pos` column captures which POS the prospect uses (Square / Toast / Clover / Other / None) so the studio knows up-front whether an integration is in scope. It's a data point for sizing the build, not a marketing axis.
 
@@ -100,7 +107,7 @@ CORS is allowed from `FRONTEND_URL` only, with `credentials: true` so the sessio
 
 Set via `wrangler secret put` for sensitive values, or `[vars]` in `wrangler.toml` for plain config.
 
-**Secrets (`wrangler secret put`):**
+**Secrets (Cloudflare dashboard → Worker → Settings → Variables and Secrets):**
 - `RESEND_API_KEY` — Resend API key
 - `BETTER_AUTH_SECRET` — random 32+ byte secret used to sign session cookies
 - `ADMIN_UID` — Better Auth `user.id` of the studio admin (you)
