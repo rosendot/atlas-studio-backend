@@ -36,7 +36,7 @@ export function getAuth(env: Bindings) {
       autoSignIn: true,
       sendResetPassword: async ({ user, url }) => {
         await resend.emails.send({
-          from: "inquiry@atlasstudio.com",
+          from: "rosendo@atlasstudio.dev",
           to: user.email,
           subject: "Reset your Atlas Studio password",
           text: [
@@ -57,7 +57,7 @@ export function getAuth(env: Bindings) {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => {
         await resend.emails.send({
-          from: "inquiry@atlasstudio.com",
+          from: "rosendo@atlasstudio.dev",
           to: user.email,
           subject: "Verify your email",
           text: [

@@ -1,8 +1,8 @@
 import { Resend } from "resend";
 import type { Bindings } from "../../worker-configuration";
 
-const FROM = "inquiry@atlasstudio.com";
-const ADMIN_EMAIL = "you@atlasstudio.com";
+const FROM = "rosendo@atlasstudio.dev";
+const ADMIN_EMAIL = "rosendo@atlasstudio.dev";
 
 function client(env: Bindings) {
   return new Resend(env.RESEND_API_KEY);
