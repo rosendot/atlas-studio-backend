@@ -1,5 +1,39 @@
 import type { Bindings } from "../../worker-configuration";
 
+/** Max upload size in bytes (25 MB). */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Whitelist of MIME types the studio explicitly allows clients/admin to
+ * upload. Anything outside this list is rejected — defends against stored
+ * XSS (no HTML/SVG) and dangerous binaries.
+ */
+export const ALLOWED_MIME_TYPES = new Set([
+  // Documents
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "text/csv",
+  // Images (no SVG — it can execute scripts)
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  // Video/audio (rare, but useful for client uploads of intro reels etc.)
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  // Archives
+  "application/zip",
+]);
+
+export function isAllowedMime(type: string | null | undefined): boolean {
+  return !!type && ALLOWED_MIME_TYPES.has(type);
+}
+
 /**
  * Upload a body to R2 under projects/<projectId>/<id>-<filename>.
  * Returns the storage key for the database record.
@@ -12,35 +46,46 @@ export async function uploadFile(
   contentType?: string,
 ): Promise<string> {
   const id = crypto.randomUUID();
-  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
   const key = `projects/${projectId}/${id}-${safeName}`;
 
+  // Always store with octet-stream + attachment disposition. The download
+  // handler overrides these anyway, but defense in depth.
   await env.FILES.put(key, body, {
     httpMetadata: {
-      contentType: contentType || "application/octet-stream",
+      contentType: "application/octet-stream",
       contentDisposition: `attachment; filename="${safeName}"`,
     },
+    customMetadata: contentType ? { originalContentType: contentType } : undefined,
   });
 
   return key;
 }
 
 /**
- * Stream a file directly from R2 through the Worker.
+ * Stream a file from R2 through the Worker.
  *
- * R2 doesn't expose Cloudflare-issued presigned URLs to bound buckets, so we
- * proxy reads through the Worker. The request is already authenticated by
- * `requireAuth` upstream, which is the access boundary we want anyway.
+ * Hardened headers:
+ *   - Content-Type forced to application/octet-stream (never trust uploader)
+ *   - Content-Disposition forced to attachment
+ *   - X-Content-Type-Options: nosniff (no MIME sniffing in the browser)
  */
 export async function getFileResponse(
   env: Bindings,
   storagePath: string,
+  filename?: string,
 ): Promise<Response> {
   const obj = await env.FILES.get(storagePath);
   if (!obj) return new Response("File not found", { status: 404 });
 
+  const safeName = (filename || storagePath.split("/").pop() || "file")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 200);
+
   const headers = new Headers();
-  obj.writeHttpMetadata(headers);
+  headers.set("Content-Type", "application/octet-stream");
+  headers.set("Content-Disposition", `attachment; filename="${safeName}"`);
+  headers.set("X-Content-Type-Options", "nosniff");
   headers.set("etag", obj.httpEtag);
 
   return new Response(obj.body, { headers });

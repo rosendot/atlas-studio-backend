@@ -63,6 +63,7 @@ Better Auth handles sign-in, sign-up, OAuth callbacks, password reset, email ver
 - `GET /files?project_id=xxx` — list files
 - `GET /files/:id/download` — Worker-streamed R2 download
 - `POST /files` — upload file (multipart) to R2
+- `DELETE /files/:id` — remove file from R2 and DB (admin, or owner client)
 
 ## Generating `BETTER_AUTH_SECRET`
 

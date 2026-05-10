@@ -1,8 +1,10 @@
 import { Resend } from "resend";
 import type { Bindings } from "../../worker-configuration";
+import { STUDIO_EMAIL } from "../lib/studio";
+import { stripNewlines } from "../utils/validate";
 
-const FROM = "rosendo@atlasstudio.dev";
-const ADMIN_EMAIL = "rosendo@atlasstudio.dev";
+const FROM = STUDIO_EMAIL;
+const ADMIN_EMAIL = STUDIO_EMAIL;
 
 function client(env: Bindings) {
   return new Resend(env.RESEND_API_KEY);
@@ -24,7 +26,7 @@ export async function sendLeadAlert(
   await client(env).emails.send({
     from: FROM,
     to: ADMIN_EMAIL,
-    subject: `New inquiry — ${lead.business}`,
+    subject: stripNewlines(`New inquiry — ${lead.business}`).slice(0, 200),
     text: [
       `Name: ${lead.name}`,
       `Business: ${lead.business}`,
@@ -50,7 +52,7 @@ export async function sendMilestoneUpdate(
   await client(env).emails.send({
     from: FROM,
     to: email,
-    subject: `Milestone completed — ${milestoneTitle}`,
+    subject: stripNewlines(`Milestone completed — ${milestoneTitle}`).slice(0, 200),
     text: [
       `Hi ${clientName},`,
       "",

@@ -5,7 +5,8 @@ import { getDb, schema } from "../db/client";
 import { getAuth } from "../lib/auth";
 import { requireAuth } from "../middleware/auth";
 import { adminOnly } from "../middleware/adminOnly";
-import { isValidEmail, missingField } from "../utils/validate";
+import { rateLimit } from "../middleware/rateLimit";
+import { isUuid, isValidEmail, missingField } from "../utils/validate";
 import { error, success } from "../utils/response";
 
 export const authRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -28,13 +29,14 @@ authRouter.post("/invite", requireAuth, adminOnly, async (c) => {
     .catch(() => ({}))) as { lead_id?: string };
   const missing = missingField(body, ["lead_id"]);
   if (missing) return error(c, `${missing} is required`);
+  if (!isUuid(body.lead_id)) return error(c, "Invalid lead_id");
 
   const db = getDb(c.env);
 
   const [lead] = await db
     .select()
     .from(schema.leads)
-    .where(eq(schema.leads.id, body.lead_id!))
+    .where(eq(schema.leads.id, body.lead_id))
     .limit(1);
   if (!lead) return error(c, "Lead not found", 404);
 
@@ -47,27 +49,48 @@ authRouter.post("/invite", requireAuth, adminOnly, async (c) => {
 
   const auth = getAuth(c.env);
 
-  // 1. Provision the auth user. Random password is fine — the client never
-  //    sees it; they set their real password through the reset flow.
-  const throwaway = crypto.randomUUID() + crypto.randomUUID();
-  const signUpResult = await auth.api.signUpEmail({
-    body: {
-      email: lead.email,
-      password: throwaway,
-      name: lead.name,
-    },
-  });
+  // 1. Resolve the auth user. If someone already signed up with this email
+  //    (legitimately or as a squat), reuse their user row instead of failing.
+  //    Otherwise provision a fresh one with a throwaway password — the client
+  //    sets their real password via the reset link in the invite email.
+  let authUid: string;
 
-  if (!signUpResult?.user) {
-    return error(c, "Failed to provision auth user", 502);
+  const [existingUser] = await db
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(eq(schema.users.email, lead.email))
+    .limit(1);
+
+  if (existingUser) {
+    authUid = existingUser.id;
+  } else {
+    const throwaway = crypto.randomUUID() + crypto.randomUUID();
+    const signUpResult = await auth.api.signUpEmail({
+      body: {
+        email: lead.email,
+        password: throwaway,
+        name: lead.name,
+      },
+    });
+    if (!signUpResult?.user) {
+      return error(c, "Failed to provision invite", 502);
+    }
+    authUid = signUpResult.user.id;
   }
 
-  // 2. Insert the client row, linked to the new auth user.
+  // Mark the user verified — we know they're real because we invited them.
+  // Skipping this would block them from logging in (requireEmailVerification).
+  await db
+    .update(schema.users)
+    .set({ emailVerified: true })
+    .where(eq(schema.users.id, authUid));
+
+  // 2. Insert the client row, linked to the auth user.
   const [client] = await db
     .insert(schema.clients)
     .values({
       leadId: lead.id,
-      authUid: signUpResult.user.id,
+      authUid,
       name: lead.name,
       business: lead.business,
       email: lead.email,
@@ -99,8 +122,12 @@ authRouter.post("/invite", requireAuth, adminOnly, async (c) => {
 /**
  * POST /auth/reset — public, request a password reset link.
  * Always responds success to avoid leaking whether the email exists.
+ * Rate-limited to prevent email bombing and Resend quota abuse.
  */
-authRouter.post("/reset", async (c) => {
+authRouter.post(
+  "/reset",
+  rateLimit({ name: "auth-reset", limit: 3, windowSeconds: 60 * 60 }),
+  async (c) => {
   const body = (await c.req
     .json<{ email?: string }>()
     .catch(() => ({}))) as { email?: string };
@@ -121,7 +148,8 @@ authRouter.post("/reset", async (c) => {
       .catch(() => undefined),
   );
 
-  return success(c, {
-    message: "If that email exists, a reset link has been sent.",
-  });
-});
+    return success(c, {
+      message: "If that email exists, a reset link has been sent.",
+    });
+  },
+);

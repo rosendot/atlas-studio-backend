@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import type { Bindings, Variables } from "../worker-configuration";
 import { getAuth } from "./lib/auth";
 import { leadsRouter } from "./routes/leads";
@@ -12,16 +13,31 @@ import { filesRouter } from "./routes/files";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-app.use("*", (c, next) =>
-  cors({
-    origin: c.env.FRONTEND_URL,
+app.use(
+  "*",
+  secureHeaders({
+    strictTransportSecurity: "max-age=63072000; includeSubDomains; preload",
+    xContentTypeOptions: "nosniff",
+    referrerPolicy: "no-referrer",
+    xFrameOptions: "DENY",
+  }),
+);
+
+app.use("*", (c, next) => {
+  // Normalize FRONTEND_URL — strip trailing slash, and explicitly allow the
+  // origin plus its www variant. Anything else is rejected.
+  const origin = c.env.FRONTEND_URL.replace(/\/$/, "");
+  const url = new URL(origin);
+  const allowed = new Set([origin, `${url.protocol}//www.${url.hostname}`]);
+  return cors({
+    origin: (incoming) => (allowed.has(incoming) ? incoming : null),
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
-  })(c, next),
-);
+  })(c, next);
+});
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
@@ -42,7 +58,9 @@ app.route("/messages", messagesRouter);
 app.route("/files", filesRouter);
 
 app.onError((err, c) => {
-  console.error("Unhandled error:", err.message, err.stack);
+  // Log only the message + a stable identifier — not the stack — so Workers
+  // logs don't accumulate full request bodies / user-controlled strings.
+  console.error("Unhandled error:", err.name, err.message);
   return c.json({ error: "Internal server error" }, 500);
 });
 

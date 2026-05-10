@@ -4,7 +4,12 @@ import type { Bindings, Variables } from "../../worker-configuration";
 import { getDb, schema } from "../db/client";
 import { requireAuth } from "../middleware/auth";
 import { adminOnly } from "../middleware/adminOnly";
-import { missingField } from "../utils/validate";
+import {
+  capString,
+  isUuid,
+  missingField,
+  safeDateString,
+} from "../utils/validate";
 import { error, success } from "../utils/response";
 import { notifyMilestoneComplete } from "../services/notifications";
 
@@ -15,7 +20,9 @@ const VALID_STATUSES = ["pending", "in_progress", "complete"] as const;
 /** GET /milestones?project_id=xxx — admin or owning client */
 milestonesRouter.get("/", requireAuth, async (c) => {
   const projectId = c.req.query("project_id");
-  if (!projectId) return error(c, "project_id query parameter is required");
+  if (!projectId || !isUuid(projectId)) {
+    return error(c, "Valid project_id query parameter is required");
+  }
 
   const db = getDb(c.env);
 
@@ -47,15 +54,25 @@ milestonesRouter.post("/", requireAuth, adminOnly, async (c) => {
 
   const missing = missingField(body, ["project_id", "title"]);
   if (missing) return error(c, `${missing} is required`);
+  if (!isUuid(body.project_id)) return error(c, "Invalid project_id");
+
+  const title = capString(body.title, 200);
+  if (!title) return error(c, "title is required");
+
+  const dueDate =
+    body.due_date !== undefined ? safeDateString(body.due_date) : null;
+  if (body.due_date !== undefined && body.due_date !== null && !dueDate) {
+    return error(c, "due_date must be a valid date");
+  }
 
   const db = getDb(c.env);
   const [milestone] = await db
     .insert(schema.milestones)
     .values({
-      projectId: String(body.project_id),
-      title: String(body.title),
-      description: body.description ? String(body.description) : null,
-      dueDate: body.due_date ? String(body.due_date) : null,
+      projectId: body.project_id,
+      title,
+      description: capString(body.description, 2000),
+      dueDate,
       sortOrder: typeof body.sort_order === "number" ? body.sort_order : 0,
     })
     .returning();
@@ -65,6 +82,9 @@ milestonesRouter.post("/", requireAuth, adminOnly, async (c) => {
 
 /** PATCH /milestones/:id — admin only */
 milestonesRouter.patch("/:id", requireAuth, adminOnly, async (c) => {
+  const id = c.req.param("id");
+  if (!isUuid(id)) return error(c, "Invalid milestone id", 400);
+
   const body = (await c.req
     .json<Record<string, unknown>>()
     .catch(() => ({}))) as Record<string, unknown>;
@@ -77,9 +97,23 @@ milestonesRouter.patch("/:id", requireAuth, adminOnly, async (c) => {
   }
 
   const updates: Partial<typeof schema.milestones.$inferInsert> = {};
-  if (body.title !== undefined) updates.title = String(body.title);
-  if (body.description !== undefined) updates.description = String(body.description);
-  if (body.due_date !== undefined) updates.dueDate = String(body.due_date);
+  if (body.title !== undefined) {
+    const t = capString(body.title, 200);
+    if (!t) return error(c, "title must be a non-empty string");
+    updates.title = t;
+  }
+  if (body.description !== undefined) {
+    updates.description = capString(body.description, 2000);
+  }
+  if (body.due_date !== undefined) {
+    if (body.due_date === null) {
+      updates.dueDate = null;
+    } else {
+      const d = safeDateString(body.due_date);
+      if (!d) return error(c, "due_date must be a valid date");
+      updates.dueDate = d;
+    }
+  }
   if (typeof body.sort_order === "number") updates.sortOrder = body.sort_order;
   if (body.status !== undefined) {
     updates.status = String(body.status);
@@ -90,7 +124,7 @@ milestonesRouter.patch("/:id", requireAuth, adminOnly, async (c) => {
   const [updated] = await db
     .update(schema.milestones)
     .set(updates)
-    .where(eq(schema.milestones.id, c.req.param("id")))
+    .where(eq(schema.milestones.id, id))
     .returning();
 
   if (!updated) return error(c, "Milestone not found", 404);
@@ -98,7 +132,7 @@ milestonesRouter.patch("/:id", requireAuth, adminOnly, async (c) => {
   if (body.status === "complete") {
     c.executionCtx.waitUntil(
       notifyMilestoneComplete(c.env, updated.id).catch((err) =>
-        console.error("Failed to send milestone notification:", err),
+        console.error("Failed to send milestone notification:", err.name, err.message),
       ),
     );
   }

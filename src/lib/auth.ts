@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { Resend } from "resend";
 import { getDb, schema } from "../db/client";
 import type { Bindings } from "../../worker-configuration";
+import { STUDIO_EMAIL } from "./studio";
 
 /**
  * Build a request-scoped Better Auth instance bound to the current Worker env.
@@ -15,8 +16,9 @@ import type { Bindings } from "../../worker-configuration";
 export function getAuth(env: Bindings) {
   const resend = new Resend(env.RESEND_API_KEY);
 
-  const baseURL =
-    env.FRONTEND_URL.replace(/\/$/, "") + "/api/auth";
+  const frontendOrigin = env.FRONTEND_URL.replace(/\/$/, "");
+  const baseURL = frontendOrigin + "/api/auth";
+  const cookieDomain = new URL(frontendOrigin).hostname.replace(/^www\./, "");
 
   const options: BetterAuthOptions = {
     baseURL,
@@ -30,13 +32,28 @@ export function getAuth(env: Bindings) {
         verification: schema.verifications,
       },
     }),
+    advanced: {
+      defaultCookieAttributes: {
+        secure: true,
+        httpOnly: true,
+        sameSite: "lax",
+        domain: cookieDomain,
+      },
+    },
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: false,
+      // Public sign-up stays enabled because /auth/invite uses auth.api.signUpEmail
+      // server-side. We mitigate sign-up squatting two ways:
+      //   1. requireEmailVerification: true — unverified accounts can't log in
+      //   2. Authenticated routes filter by clients.authUid, so a stray signup
+      //      that isn't an admin and has no clients row sees nothing.
+      requireEmailVerification: true,
       autoSignIn: true,
+      minPasswordLength: 12,
+      maxPasswordLength: 128,
       sendResetPassword: async ({ user, url }) => {
         await resend.emails.send({
-          from: "rosendo@atlasstudio.dev",
+          from: STUDIO_EMAIL,
           to: user.email,
           subject: "Reset your Atlas Studio password",
           text: [
@@ -57,7 +74,7 @@ export function getAuth(env: Bindings) {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => {
         await resend.emails.send({
-          from: "rosendo@atlasstudio.dev",
+          from: STUDIO_EMAIL,
           to: user.email,
           subject: "Verify your email",
           text: [

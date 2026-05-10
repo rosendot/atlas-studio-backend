@@ -3,8 +3,10 @@ import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import type { Bindings, Variables } from "../../worker-configuration";
 import { getDb, schema, type Db } from "../db/client";
 import { requireAuth } from "../middleware/auth";
-import { missingField } from "../utils/validate";
+import { capString, isUuid, missingField } from "../utils/validate";
 import { error, success } from "../utils/response";
+
+const MAX_MESSAGE_BODY = 5000;
 
 export const messagesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -31,7 +33,9 @@ async function verifyProjectAccess(
 /** GET /messages?project_id=xxx — get conversation thread */
 messagesRouter.get("/", requireAuth, async (c) => {
   const projectId = c.req.query("project_id");
-  if (!projectId) return error(c, "project_id query parameter is required");
+  if (!projectId || !isUuid(projectId)) {
+    return error(c, "Valid project_id query parameter is required");
+  }
 
   const db = getDb(c.env);
   if (!(await verifyProjectAccess(db, projectId, c.var.uid, c.var.role))) {
@@ -66,8 +70,12 @@ messagesRouter.post("/", requireAuth, async (c) => {
 
   const missing = missingField(body, ["project_id", "body"]);
   if (missing) return error(c, `${missing} is required`);
+  if (!isUuid(body.project_id)) return error(c, "Invalid project_id");
 
-  const projectId = String(body.project_id);
+  const messageBody = capString(body.body, MAX_MESSAGE_BODY);
+  if (!messageBody) return error(c, "body is required");
+
+  const projectId = body.project_id;
 
   const db = getDb(c.env);
   if (!(await verifyProjectAccess(db, projectId, c.var.uid, c.var.role))) {
@@ -80,7 +88,7 @@ messagesRouter.post("/", requireAuth, async (c) => {
       projectId,
       senderUid: c.var.uid,
       senderRole: c.var.role,
-      body: String(body.body),
+      body: messageBody,
     })
     .returning();
 
