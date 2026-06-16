@@ -2,6 +2,8 @@
 
 Cloudflare Worker (Hono + D1 + R2) that powers Atlas Studio's lead pipeline and client portal.
 
+**Live at:** [https://api.atlasstudio.dev](https://api.atlasstudio.dev). Frontend is at [https://atlasstudio.dev](https://atlasstudio.dev) (separate repo: [`atlas-studio-frontend`](../atlas-studio-frontend/)).
+
 ## What Atlas Studio sells
 
 A custom Astro website for local businesses, hosted on Cloudflare Pages. Clients log into a portal (this backend) to follow their build, exchange messages, and pull files. See [CLAUDE.md](./CLAUDE.md) for what this backend specifically powers, and [`../atlas-studio-frontend/CLAUDE.md`](../atlas-studio-frontend/CLAUDE.md) for the full positioning rules. Any user-facing string this backend emits must match that voice.

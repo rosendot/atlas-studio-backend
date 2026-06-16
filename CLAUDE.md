@@ -28,7 +28,7 @@ Deploys happen via Cloudflare's dashboard Git integration on every push to `main
 - **Auth:** Better Auth (self-hosted, sessions in D1) — email/password + Google OAuth
 - **Email:** Resend (lead alerts, milestone notifications, password reset / verification)
 - **File storage:** Cloudflare R2 (uploads + Worker-streamed downloads)
-- **Hosting:** Cloudflare Workers (one Worker, custom domain `api.atlasstudio.<tld>`)
+- **Hosting:** Cloudflare Workers (one Worker, custom domain `api.atlasstudio.dev`)
 
 There is no Express, no Node runtime, no Cloud Run, no Cloud SQL, no GCS, no Docker, no Firebase. All of that is gone. If you find references to it, they're stale and should be removed.
 
@@ -115,7 +115,7 @@ Set via `wrangler secret put` for sensitive values, or `[vars]` in `wrangler.tom
 - `GOOGLE_CLIENT_SECRET` *(optional)* — for Sign in with Google
 
 **Plain vars (`[vars]` in `wrangler.toml`):**
-- `FRONTEND_URL` — frontend origin (e.g. `https://atlasstudio.<tld>`); used for CORS, cookie domain, and the `baseURL` Better Auth bakes into emails
+- `FRONTEND_URL` — frontend origin (`https://atlasstudio.dev` in production); used for CORS, cookie domain, and the `baseURL` Better Auth bakes into emails
 
 **Bindings:**
 - `DB` — D1 database
